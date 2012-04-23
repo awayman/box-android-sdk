@@ -115,6 +115,8 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
      *            A token that must be passed back to Box. You will need this when trying to send data back to Box.
      * @param file
      *            The file that the user wants to edit.
+     * @param fileName
+     *            The file name that the file was saved to Box as.
      * @param type
      *            The mime type of the file (e.g. text/plain).
      */
@@ -269,6 +271,24 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
         intent.putExtras(intents.get(boxToken).getExtras());
         intent.putExtra(EXTRA_ONE_CLOUD_APP_PACKAGE_NAME, mContext.getPackageName());
         intent.putExtra(EXTRA_FILE_NAME, fileName);
+        mContext.sendBroadcast(intent);
+    }
+
+    /**
+     * Launch Box.
+     * 
+     * @param boxToken
+     *            A token that must be passed back to Box.
+     */
+    public void launchBox(final long boxToken) {
+        if (intents.get(boxToken) == null) {
+            return;
+        }
+        Intent intent = new Intent();
+        intent.setAction(ACTION_BOX_LAUNCH);
+        intent.setPackage(BOX_PACKAGE_NAME);
+        intent.putExtras(intents.get(boxToken).getExtras());
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         mContext.sendBroadcast(intent);
     }
 
