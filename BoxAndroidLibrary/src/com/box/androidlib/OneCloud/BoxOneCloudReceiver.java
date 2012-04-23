@@ -63,10 +63,7 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
     private static final String BOX_PACKAGE_NAME = "com.box.android";
 
     /** Map of tokens to intents. */
-    private final ConcurrentHashMap<Long, Intent> intents = new ConcurrentHashMap<Long, Intent>();
-
-    /** Context. */
-    private Context mContext;
+    private static final ConcurrentHashMap<Long, Intent> INTENTS = new ConcurrentHashMap<Long, Intent>();
 
     @Override
     public void onReceive(final Context context, final Intent intent) {
@@ -75,9 +72,7 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
             return;
         }
 
-        mContext = context;
-
-        intents.put(boxToken, intent);
+        INTENTS.put(boxToken, intent);
 
         if (intent.getAction().equals(ACTION_BOX_EDIT_FILE)) {
             onEditFileRequested(context, boxToken, new File(intent.getData().getPath()), intent.getStringExtra(EXTRA_FILE_NAME), intent.getType());
@@ -204,6 +199,8 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
      * Upload a new version of a file to Box. The file will be renamed to newFileName on Box. If you do not want to rename the file, use
      * uploadNewVersion(boxToken, file).
      * 
+     * @param context
+     *            Your application's context.
      * @param boxToken
      *            A token that must be passed back to Box. You should have received a token when Box asked you to modify the file.
      * @param file
@@ -211,42 +208,46 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
      * @param newFileName
      *            The file on Box will be renamed to this.
      */
-    public void uploadNewVersion(final long boxToken, final File file, final String newFileName) {
-        if (intents.get(boxToken) == null) {
+    public static void uploadNewVersion(final Context context, final long boxToken, final File file, final String newFileName) {
+        if (INTENTS.get(boxToken) == null) {
             return;
         }
         Intent intent = new Intent();
         intent.setAction(ACTION_BOX_UPLOAD_NEW_VERSION);
         String mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(
-            BoxUtils.getFileExtension(intents.get(boxToken).getStringExtra(EXTRA_FILE_NAME), "").toLowerCase());
+            BoxUtils.getFileExtension(INTENTS.get(boxToken).getStringExtra(EXTRA_FILE_NAME), "").toLowerCase());
         if (mimeType == null) {
             mimeType = "application/octet-stream";
         }
         intent.setDataAndType(Uri.fromFile(file), mimeType);
         intent.setPackage(BOX_PACKAGE_NAME);
-        intent.putExtras(intents.get(boxToken).getExtras());
-        intent.putExtra(EXTRA_ONE_CLOUD_APP_PACKAGE_NAME, mContext.getPackageName());
+        intent.putExtras(INTENTS.get(boxToken).getExtras());
+        intent.putExtra(EXTRA_ONE_CLOUD_APP_PACKAGE_NAME, context.getPackageName());
         if (newFileName != null) {
             intent.putExtra(EXTRA_FILE_NAME, newFileName);
         }
-        mContext.sendBroadcast(intent);
+        context.sendBroadcast(intent);
     }
 
     /**
      * Upload a new version of a file to Box. The original filename on Box will be retained.
      * 
+     * @param context
+     *            Your application's context.
      * @param boxToken
      *            A token that must be passed back to Box. You should have received a token when Box asked you to modify the file.
      * @param file
      *            The file to be uploaded to Box.
      */
-    public void uploadNewVersion(final long boxToken, final File file) {
-        this.uploadNewVersion(boxToken, file, null);
+    public static void uploadNewVersion(final Context context, final long boxToken, final File file) {
+        uploadNewVersion(context, boxToken, file, null);
     }
 
     /**
      * Upload a new file to Box.
      * 
+     * @param context
+     *            Your application's context.
      * @param boxToken
      *            A token that must be passed back to Box. You should have received a token when Box asked you to modify the file.
      * @param file
@@ -256,8 +257,8 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
      *            used as the user will be given a chance to change it. You should wait for the onFileSaved() callback to be called to know the actual file name
      *            that was saved to Box.
      */
-    public void uploadNewFile(final long boxToken, final File file, final String fileName) {
-        if (intents.get(boxToken) == null) {
+    public void uploadNewFile(final Context context, final long boxToken, final File file, final String fileName) {
+        if (INTENTS.get(boxToken) == null) {
             return;
         }
         Intent intent = new Intent();
@@ -268,28 +269,30 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
         }
         intent.setDataAndType(Uri.fromFile(file), mimeType);
         intent.setPackage(BOX_PACKAGE_NAME);
-        intent.putExtras(intents.get(boxToken).getExtras());
-        intent.putExtra(EXTRA_ONE_CLOUD_APP_PACKAGE_NAME, mContext.getPackageName());
+        intent.putExtras(INTENTS.get(boxToken).getExtras());
+        intent.putExtra(EXTRA_ONE_CLOUD_APP_PACKAGE_NAME, context.getPackageName());
         intent.putExtra(EXTRA_FILE_NAME, fileName);
-        mContext.sendBroadcast(intent);
+        context.sendBroadcast(intent);
     }
 
     /**
      * Launch Box.
      * 
+     * @param context
+     *            Your application's context.
      * @param boxToken
      *            A token that must be passed back to Box.
      */
-    public void launchBox(final long boxToken) {
-        if (intents.get(boxToken) == null) {
+    public void launchBox(final Context context, final long boxToken) {
+        if (INTENTS.get(boxToken) == null) {
             return;
         }
         Intent intent = new Intent();
         intent.setAction(ACTION_BOX_LAUNCH);
         intent.setPackage(BOX_PACKAGE_NAME);
-        intent.putExtras(intents.get(boxToken).getExtras());
+        intent.putExtras(INTENTS.get(boxToken).getExtras());
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        mContext.sendBroadcast(intent);
+        context.sendBroadcast(intent);
     }
 
 }
