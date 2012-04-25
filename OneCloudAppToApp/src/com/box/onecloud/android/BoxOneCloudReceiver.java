@@ -1,6 +1,10 @@
-package com.box.androidlib.OneCloud;
+package com.box.onecloud.android;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.concurrent.ConcurrentHashMap;
 
 import android.content.BroadcastReceiver;
@@ -9,7 +13,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.webkit.MimeTypeMap;
 
-import com.box.androidlib.Utils.BoxUtils;
+import com.box.onecloud.android.Crypto.CryptoException;
 
 /**
  * Abstract BroadcastReceiver for handling braodcasts sent by the Box app and other OneCloud partners. Also provides methods for communicating back to Box.
@@ -58,6 +62,12 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
     public static final String EXTRA_ONE_CLOUD_APP_PACKAGE_NAME = "com.box.android.EXTRA_ONE_CLOUD_APP_PACKAGE_NAME";
     /** Extras key for bytes transferred. */
     public static final String EXTRA_BYTES_TRANSFERRED = "com.box.android.EXTRA_BYTES_TRANSFERRED";
+    /** Extras key for encryption key. */
+    public static final String EXTRA_CRYPTO_KEY = "com.box.android.EXTRA_CRYPTO_KEY";
+    /** Extras key for encryption salt. */
+    public static final String EXTRA_CRYPTO_SALT = "com.box.android.EXTRA_CRYPTO_SALT";
+    /** Extras key for whether or not the file is encrypted. */
+    public static final String EXTRA_IS_ENCRYPTED = "com.box.android.EXTRA_IS_ENCRYPTED";
 
     /** Box package name. */
     private static final String BOX_PACKAGE_NAME = "com.box.android";
@@ -74,14 +84,35 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
 
         INTENTS.put(boxToken, intent);
 
+        String cryptoKey = intent.getStringExtra(EXTRA_CRYPTO_KEY);
+        String cryptoSalt = intent.getStringExtra(EXTRA_CRYPTO_SALT);
+
         if (intent.getAction().equals(ACTION_BOX_EDIT_FILE)) {
-            onEditFileRequested(context, boxToken, new File(intent.getData().getPath()), intent.getStringExtra(EXTRA_FILE_NAME), intent.getType());
+            try {
+                InputStream inputStream = Crypto.getInputStream(new FileInputStream(intent.getData().getPath()), cryptoKey, cryptoSalt);
+                onEditFileRequested(context, boxToken, inputStream, intent.getStringExtra(EXTRA_FILE_NAME), intent.getType());
+            }
+            catch (FileNotFoundException e) {
+                return;
+            }
+            catch (CryptoException e) {
+                return;
+            }
         }
         else if (intent.getAction().equals(ACTION_BOX_CREATE_FILE)) {
             onCreateFileRequested(context, boxToken, intent.getType());
         }
         else if (intent.getAction().equals(ACTION_BOX_VIEW_FILE)) {
-            onViewFileRequested(context, boxToken, new File(intent.getData().getPath()), intent.getType());
+            try {
+                InputStream inputStream = Crypto.getInputStream(new FileInputStream(intent.getData().getPath()), cryptoKey, cryptoSalt);
+                onViewFileRequested(context, boxToken, inputStream, intent.getStringExtra(EXTRA_FILE_NAME), intent.getType());
+            }
+            catch (FileNotFoundException e) {
+                return;
+            }
+            catch (CryptoException e) {
+                return;
+            }
         }
         else if (intent.getAction().equals(ACTION_BOX_FILE_SAVED)) {
             onFileSaved(context, boxToken, intent.getStringExtra(EXTRA_FILE_NAME));
@@ -108,14 +139,14 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
      *            The Context in which the receiver is running.
      * @param boxToken
      *            A token that must be passed back to Box. You will need this when trying to send data back to Box.
-     * @param file
-     *            The file that the user wants to edit.
+     * @param inputStream
+     *            Input stream from which the file data can be read.
      * @param fileName
      *            The file name that the file was saved to Box as.
      * @param type
      *            The mime type of the file (e.g. text/plain).
      */
-    public abstract void onEditFileRequested(final Context context, final long boxToken, final File file, final String fileName, final String type);
+    public abstract void onEditFileRequested(final Context context, final long boxToken, final InputStream inputStream, final String fileName, final String type);
 
     /**
      * Box has requested that you create a new file that should be uploaded to Box by calling uploadNewFile(). You should load UI for the user to create a new
@@ -137,12 +168,14 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
      *            The Context in which the receiver is running.
      * @param boxToken
      *            A token that must be passed back to Box. You will need this when trying to send data back to Box.
-     * @param file
-     *            The file that the user wants to edit.
+     * @param inputStream
+     *            Input stream from which the file data can be read.
+     * @param fileName
+     *            The file name that the file was saved to Box as.
      * @param type
      *            The mime type of the file (e.g. text/plain).
      */
-    public abstract void onViewFileRequested(final Context context, final long boxToken, final File file, final String type);
+    public abstract void onViewFileRequested(final Context context, final long boxToken, final InputStream inputStream, final String fileName, final String type);
 
     /**
      * Box has requested that you launch your app in no particular mode. You should load general UI that is most appropriate as a starting screen.
@@ -207,15 +240,17 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
      *            The file to be uploaded to Box.
      * @param newFileName
      *            The file on Box will be renamed to this.
+     * @param isEncrypted
+     *            Whether or not the file you provided was encrypted through openEncryptedOutputStream().
      */
-    public static void uploadNewVersion(final Context context, final long boxToken, final File file, final String newFileName) {
+    public static void uploadNewVersion(final Context context, final long boxToken, final File file, final String newFileName, boolean isEncrypted) {
         if (INTENTS.get(boxToken) == null) {
             return;
         }
         Intent intent = new Intent();
         intent.setAction(ACTION_BOX_UPLOAD_NEW_VERSION);
         String mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(
-            BoxUtils.getFileExtension(INTENTS.get(boxToken).getStringExtra(EXTRA_FILE_NAME), "").toLowerCase());
+            Utils.getFileExtension(INTENTS.get(boxToken).getStringExtra(EXTRA_FILE_NAME), "").toLowerCase());
         if (mimeType == null) {
             mimeType = "application/octet-stream";
         }
@@ -226,6 +261,7 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
         if (newFileName != null) {
             intent.putExtra(EXTRA_FILE_NAME, newFileName);
         }
+        intent.putExtra(EXTRA_IS_ENCRYPTED, isEncrypted);
         context.sendBroadcast(intent);
     }
 
@@ -238,9 +274,11 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
      *            A token that must be passed back to Box. You should have received a token when Box asked you to modify the file.
      * @param file
      *            The file to be uploaded to Box.
+     * @param isEncrypted
+     *            Whether or not the file you provided was encrypted through openEncryptedOutputStream().
      */
-    public static void uploadNewVersion(final Context context, final long boxToken, final File file) {
-        uploadNewVersion(context, boxToken, file, null);
+    public static void uploadNewVersion(final Context context, final long boxToken, final File file, boolean isEncrypted) {
+        uploadNewVersion(context, boxToken, file, null, isEncrypted);
     }
 
     /**
@@ -256,14 +294,16 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
      *            The file name that Box will suggest for the user to upload the file as. Note that it is not guaranteed that this file name will actually be
      *            used as the user will be given a chance to change it. You should wait for the onFileSaved() callback to be called to know the actual file name
      *            that was saved to Box.
+     * @param isEncrypted
+     *            Whether or not the file you provided was encrypted through openEncryptedOutputStream().
      */
-    public void uploadNewFile(final Context context, final long boxToken, final File file, final String fileName) {
+    public static void uploadNewFile(final Context context, final long boxToken, final File file, final String fileName, boolean isEncrypted) {
         if (INTENTS.get(boxToken) == null) {
             return;
         }
         Intent intent = new Intent();
         intent.setAction(ACTION_BOX_UPLOAD_NEW_FILE);
-        String mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(BoxUtils.getFileExtension(fileName, "").toLowerCase());
+        String mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(Utils.getFileExtension(fileName, "").toLowerCase());
         if (mimeType == null) {
             mimeType = "application/octet-stream";
         }
@@ -272,6 +312,7 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
         intent.putExtras(INTENTS.get(boxToken).getExtras());
         intent.putExtra(EXTRA_ONE_CLOUD_APP_PACKAGE_NAME, context.getPackageName());
         intent.putExtra(EXTRA_FILE_NAME, fileName);
+        intent.putExtra(EXTRA_IS_ENCRYPTED, isEncrypted);
         context.sendBroadcast(intent);
     }
 
@@ -283,7 +324,7 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
      * @param boxToken
      *            A token that must be passed back to Box.
      */
-    public void launchBox(final Context context, final long boxToken) {
+    public static void launchBox(final Context context, final long boxToken) {
         if (INTENTS.get(boxToken) == null) {
             return;
         }
@@ -295,4 +336,26 @@ public abstract class BoxOneCloudReceiver extends BroadcastReceiver {
         context.sendBroadcast(intent);
     }
 
+    /**
+     * Open an output stream that will encrypt data as it is being written out. For example, you can use this to write out to an encrypted file by passing in a
+     * FileOutputStream pointing to your desired file location.
+     * 
+     * @param boxToken
+     *            You should have received a token from Box.
+     * @param outputStream
+     *            An OutputStream pointing to your desired output location. For example, this could be a FileOutputStream or a ByteArrayOutputStream.
+     * @return An output stream that will encrypt data as it is being written out, or null if there was an error.
+     */
+    public static OutputStream openEncryptedOutputStream(final long boxToken, final OutputStream outputStream) {
+        Intent intent = INTENTS.get(boxToken);
+        if (intent == null) {
+            return null;
+        }
+        try {
+            return Crypto.getOutputStream(outputStream, intent.getStringExtra(EXTRA_CRYPTO_KEY), intent.getStringExtra(EXTRA_CRYPTO_SALT));
+        }
+        catch (CryptoException e) {
+            return null;
+        }
+    }
 }
